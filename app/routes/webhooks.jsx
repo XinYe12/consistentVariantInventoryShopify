@@ -1,4 +1,4 @@
-import { authenticate } from "../shopify.server";
+import { authenticate, shopify } from "../shopify.server";
 import db from "../db.server";
 
 export const action = async ({ request }) => {
@@ -137,22 +137,42 @@ export const action = async ({ request }) => {
           oneunit_invent = oneunit_invent - (unit_percase * caseSold);
           console.log("CHANGE on onecase AFTER: oneunit_invent: " + oneunit_invent + " onecase_inventory: " + onecase_invent);
         }
-        const variantInventoryResponse = await admin.graphql(
-          `#graphql
-            mutation UpdateVariantInventory($variant1Id: ID!, $variant2Id: ID!, $newQuantity1: Int!, $newQuantity2: Int!) {
-              updateVariant1: productVariantUpdate(id: $variant1Id, input: { inventoryQuantity: $newQuantity1 }) {
+       const inventoryItemID_onecase = await admin.graphql(
+        `#graphql
+          query testing($input: ID!) {
+            productVariant(id: $input) {
+              id
+              inventoryItem {
                 id
-                title
-                inventoryQuantity
-              }
-              updateVariant2: productVariantUpdate(id: $variant2Id, input: { inventoryQuantity: $newQuantity2 }) {
-                id
-                title
-                inventoryQuantity
               }
             }
-          `
-        );
+          }`,
+          {
+            variables:{
+              input: `${variantID_onecase}`
+            }
+          }
+       );
+       const inventoryItemID_oneunit = await admin.graphql(
+        `#graphql
+          query testing($input: ID!) {
+            productVariant(id: $input) {
+              id
+              inventoryItem {
+                id
+              }
+            }
+          }`,
+          {
+            variables:{
+              input: `${variantID_oneunit}`
+            }
+          }
+       );
+       const inventoryItemID_onecase_json = await inventoryItemID_onecase.json(), inventoryItemID_oneunit_json = await inventoryItemID_oneunit.json();
+       const inventID_onecase = inventoryItemID_onecase_json.data.productVariant.inventoryItem.id, inventID_oneunit = inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id
+       console.log("inventoryitemID: " + inventoryItemID_onecase_json.data.productVariant.inventoryItem.id + inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id);
+       
  
       
       }
