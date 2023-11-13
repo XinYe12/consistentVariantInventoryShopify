@@ -104,7 +104,8 @@ export const action = async ({ request }) => {
 
         const responseJson = await response.json();
         let variantID_oneunit = "", variantID_onecase = "";
-        let oneunit_invent = 0, onecase_invent = 0;
+        let oneunit_invent = 0, onecase_invent = 0;//these are variables that stores the expected inventory quantity 
+        let oneunit_invent_before, onecase_invent_before;
         // Accessing the variants object
         const variantsObject = responseJson.data.product.variants;
         // Checking if variantsObject is defined and has edges
@@ -113,9 +114,11 @@ export const action = async ({ request }) => {
           variantsObject.edges.forEach(edge => {
             if(edge.node.title=="one unit"){
               variantID_oneunit = edge.node.id;
+              oneunit_invent_before = edge.node.inventoryQuantity;
               oneunit_invent = edge.node.inventoryQuantity;
             }else if(edge.node.title=="one case"){
               variantID_onecase = edge.node.id;
+              onecase_invent_before = edge.node.inventoryQuantity;
               onecase_invent = edge.node.inventoryQuantity;//onecase_invent is the metafields quantity reflecting current inventory of cases
             }
           });
@@ -127,6 +130,7 @@ export const action = async ({ request }) => {
 
         if(case_inventory == onecase_invent){
           //this means that quantity changed on "one unit", you need to update that change to case_inventory
+          //NO NEED TO CHANGE oneunit
           case_inventory = case_invent_expected;
           onecase_invent = case_invent_expected;
           console.log("CHANGE ON oneunit AFTER: caseinvent_metafield: " + case_inventory + " onecase_invent: " + onecase_invent + " oneunit_inventory:  "+ oneunit_invent);
@@ -137,6 +141,9 @@ export const action = async ({ request }) => {
           oneunit_invent = oneunit_invent - (unit_percase * caseSold);
           console.log("CHANGE on onecase AFTER: oneunit_invent: " + oneunit_invent + " onecase_inventory: " + onecase_invent);
         }
+        const delta_oneunit = oneunit_invent - oneunit_invent_before;
+        const delta_onecase = onecase_invent - onecase_invent_before;
+
        const inventoryItemID_onecase = await admin.graphql(
         `#graphql
           query testing($input: ID!) {
@@ -173,6 +180,47 @@ export const action = async ({ request }) => {
        const inventID_onecase = inventoryItemID_onecase_json.data.productVariant.inventoryItem.id, inventID_oneunit = inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id
        console.log("inventoryitemID: " + inventoryItemID_onecase_json.data.productVariant.inventoryItem.id + inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id);
        
+       const finalConsistentInventory = await admin.graphql(
+        `#graphql
+        mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+          inventoryAdjustQuantities(input: $input) {
+            userErrors {
+              field
+              message
+            }
+            inventoryAdjustmentGroup {
+              createdAt
+              reason
+              referenceDocumentUri
+              changes {
+                name
+                delta
+              }
+            }
+          }
+        }`,
+          {
+            variables:
+            {
+              input: {
+                "reason": "correction",
+                "name": "available",
+                "changes": [
+                  {
+                    "delta": `${delta_onecase}`,
+                    "inventoryItemId": `${inventID_onecase}`,
+                    "locationId": "gid://shopify/Location/72827994361"
+                  },
+                  {
+                    "delta": `${delta_oneunit}`,
+                    "inventoryItemId": `${inventID_oneunit}`,
+                    "locationId": "gid://shopify/Location/72827994361"
+                  }
+                ]
+              }
+            }
+          }
+       );
  
       
       }
