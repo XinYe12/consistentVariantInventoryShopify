@@ -49,6 +49,7 @@ export const action = async ({ request }) => {
           }
         }
       );
+      
       const metafieldsJson = await metafieldsResponse.json();
       let soldincase_global = false;
       let unit_percase = 0, case_inventory = 0;
@@ -64,7 +65,7 @@ export const action = async ({ request }) => {
               unit_percase = edge.node.value;
               
             }else if(metafield=="caseinventnum"){
-              case_inventory = edge.node.value;
+              case_inventory = edge.node.value;//metafield case inventory, before value
               
             }
             
@@ -126,104 +127,131 @@ export const action = async ({ request }) => {
           console.error("Variants information not found in the response.");
         }
         console.log("BEFORE: oneunit invent: " + oneunit_invent  + " onecase: "+ onecase_invent+" || "+variantID_onecase+variantID_oneunit );
-        const case_invent_expected = Math.floor(oneunit_invent / unit_percase); // 
-
-        if(case_inventory == onecase_invent){
-          //this means that quantity changed on "one unit", you need to update that change to case_inventory
-          //NO NEED TO CHANGE oneunit
-          case_inventory = case_invent_expected;
-          onecase_invent = case_invent_expected;
-          console.log("CHANGE ON oneunit AFTER: caseinvent_metafield: " + case_inventory + " onecase_invent: " + onecase_invent + " oneunit_inventory:  "+ oneunit_invent);
-
-        }else{
-          // if the previouse case inventory is not the same as current one, that means case inventory did change
-          const caseSold = case_inventory - onecase_invent;
-          oneunit_invent = oneunit_invent - (unit_percase * caseSold);
-          console.log("CHANGE on onecase AFTER: oneunit_invent: " + oneunit_invent + " onecase_inventory: " + onecase_invent);
-        }
+        let delta_onecase = onecase_invent - case_inventory;//calculate the case delta first
+        oneunit_invent = oneunit_invent + (delta_onecase * unit_percase);
         const delta_oneunit = oneunit_invent - oneunit_invent_before;
-        const delta_onecase = onecase_invent - onecase_invent_before;
+        const case_invent_expected = Math.floor(oneunit_invent / unit_percase); // 
+        delta_onecase = case_invent_expected - onecase_invent_before;
+        console.log("AFTER: oneunit invent: " + oneunit_invent  + " Delta_oneunit: " +delta_oneunit + "delta_onecase: " + delta_onecase+ " onecase: "+ onecase_invent+" || "+variantID_onecase+variantID_oneunit );
 
-       const inventoryItemID_onecase = await admin.graphql(
-        `#graphql
-          query testing($input: ID!) {
-            productVariant(id: $input) {
-              id
-              inventoryItem {
-                id
-              }
-            }
-          }`,
-          {
-            variables:{
-              input: `${variantID_onecase}`
-            }
-          }
-       );
-       const inventoryItemID_oneunit = await admin.graphql(
-        `#graphql
-          query testing($input: ID!) {
-            productVariant(id: $input) {
-              id
-              inventoryItem {
-                id
-              }
-            }
-          }`,
-          {
-            variables:{
-              input: `${variantID_oneunit}`
-            }
-          }
-       );
-       const inventoryItemID_onecase_json = await inventoryItemID_onecase.json(), inventoryItemID_oneunit_json = await inventoryItemID_oneunit.json();
-       const inventID_onecase = inventoryItemID_onecase_json.data.productVariant.inventoryItem.id, inventID_oneunit = inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id
-       console.log("inventoryitemID: " + inventoryItemID_onecase_json.data.productVariant.inventoryItem.id + inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id);
-       
-       const finalConsistentInventory = await admin.graphql(
-        `#graphql
-        mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
-          inventoryAdjustQuantities(input: $input) {
-            userErrors {
-              field
-              message
-            }
-            inventoryAdjustmentGroup {
-              createdAt
-              reason
-              referenceDocumentUri
-              changes {
-                name
-                delta
-              }
-            }
-          }
-        }`,
-          {
-            variables:
-            {
-              input: {
-                "reason": "correction",
-                "name": "available",
-                "changes": [
-                  {
-                    "delta": `${delta_onecase}`,
-                    "inventoryItemId": `${inventID_onecase}`,
-                    "locationId": "gid://shopify/Location/72827994361"
-                  },
-                  {
-                    "delta": `${delta_oneunit}`,
-                    "inventoryItemId": `${inventID_oneunit}`,
-                    "locationId": "gid://shopify/Location/72827994361"
+        if (!((delta_oneunit==0) && (delta_onecase==0) && (case_invent_expected==case_inventory))){
+          const inventoryItemID_onecase = await admin.graphql(
+            `#graphql
+              query testing($input: ID!) {
+                productVariant(id: $input) {
+                  id
+                  inventoryItem {
+                    id
                   }
-                ]
+                }
+              }`,
+              {
+                variables:{
+                  input: `${variantID_onecase}`
+                }
               }
-            }
-          }
-       );
- 
+          );
+          const inventoryItemID_oneunit = await admin.graphql(
+            `#graphql
+              query testing($input: ID!) {
+                productVariant(id: $input) {
+                  id
+                  inventoryItem {
+                    id
+                  }
+                }
+              }`,
+              {
+                variables:{
+                  input: `${variantID_oneunit}`
+                }
+              }
+          );
+          const inventoryItemID_onecase_json = await inventoryItemID_onecase.json(), inventoryItemID_oneunit_json = await inventoryItemID_oneunit.json();
+          const inventID_onecase = inventoryItemID_onecase_json.data.productVariant.inventoryItem.id, inventID_oneunit = inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id
+          console.log("inventoryitemID: " + inventoryItemID_onecase_json.data.productVariant.inventoryItem.id + inventoryItemID_oneunit_json.data.productVariant.inventoryItem.id);
+          const adjustMetafieldInventory = await admin.graphql(
+            `#graphql
+              mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                metafieldsSet(metafields: $metafields) {
+                  metafields {
+                    key
+                    value
+                    createdAt
+                    updatedAt
+                    namespace
+                  }
+                  userErrors {
+                    field
+                    message
+                    code
+                  }
+                }
+              }`,
+              {
+                variables:{
+                  
+                    metafields: [
+                      {
+                        "key": "caseinventnum",
+                        "namespace": "custom",
+                        "ownerId": `gid://shopify/Product/${shopifyProductId}`,
+                        "type": "number_integer",
+                        "value": `${case_invent_expected}`
+                      }
+                    ]
+                  
+                }
+              }
+          );
+          const adjustMetafieldInventory_json = await adjustMetafieldInventory.json();
+          console.log(adjustMetafieldInventory_json.data.metafieldsSet.userErrors);
+          const finalConsistentInventory = await admin.graphql(
+            `#graphql
+            mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+              inventoryAdjustQuantities(input: $input) {
+                userErrors {
+                  field
+                  message
+                }
+                inventoryAdjustmentGroup {
+                  createdAt
+                  reason
+                  referenceDocumentUri
+                  changes {
+                    name
+                    delta
+                  }
+                }
+              }
+            }`,
+              {
+                variables:
+                {
+                  input: {
+                    "reason": "correction",
+                    "name": "available",
+                    "changes": [
+                      {
+                        "delta": delta_onecase,
+                        "inventoryItemId": `${inventID_onecase}`,
+                        "locationId": "gid://shopify/Location/72722579705"
+                      },
+                      {
+                        "delta": delta_oneunit,
+                        "inventoryItemId": `${inventID_oneunit}`,
+                        "locationId": "gid://shopify/Location/72722579705"
+                      }
+                    ]
+                  }
+                }
+              }
+          );
+          const finalConsistentInventory_json = await finalConsistentInventory.json();
+          console.log(finalConsistentInventory_json.data.inventoryAdjustQuantities.userErrors);
+        }//end of if stmt to check if both delta is 0
       
-      }
+      }//  end of if statement to check if it is a soldincase product
 
       break;
     default:
